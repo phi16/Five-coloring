@@ -122,6 +122,9 @@ window.addEventListener("load",_=>{
       distLinePoint(a2,b2,b1)
     );
   };
+  const angleFrom = (b,p)=>{
+    return Math.atan2(p.y-b.y, p.x-b.x);
+  };
 
   let vertices = new Set(); // Set {x:R,y:R,proxy:false,neighbor:Set Vertex,state:State}
 
@@ -320,6 +323,7 @@ window.addEventListener("load",_=>{
     }
   };
 
+  let chainType = null;
   let blackFrame = false;
   let blackCenter = null;
   let coloringGen = null;
@@ -358,6 +362,7 @@ window.addEventListener("load",_=>{
       return s;
     }
     function startChain(v) {
+      chainType = "default";
       blackFrame = true;
       blackCenter = v;
     }
@@ -429,28 +434,115 @@ window.addEventListener("load",_=>{
       console.log(minC);
       yield* wait(10);
       yield* reduce();
-      let colors = {0:false, 1:false, 2:false, 3:false, 4:false};
       let ns = neighbors(minV);
-      startChain(minV);
-      for(let n of ns) {
-        yield* wait(10);
-        let rn = yield* trace(minV,n);
-        colors[rn.state.name] = true;
-      }
-      yield* wait(10);
+      let kempeMethod = function*(){
+        startChain(minV);
+        chainType = "kempe";
+        // Kempe chain
+        let na = Array.from(ns);
+        na.sort((a,b)=>{
+          let aa = angleFrom(minV,a);
+          let ab = angleFrom(minV,b);
+          return aa - ab;
+        });
+        let found = false;
+        let orbits = new Set();
+        let color0 = na[0].state.name;
+        let color1 = na[1].state.name;
+        let color2 = na[2].state.name;
+        function* traverse(v,n,c1,c2) {
+          if(n.state.name != c1 || n.traversed) return;
+          orbits.add(n);
+          v.state.chain.add({target:n,color:255});
+          yield* wait(20);
+          if(n == na[2]) {
+            found = true;
+            n.state.chain.add({target:minV,color:255});
+            yield* wait(20);
+          }
+          if(n.proxy) {
+            for(let nn of neighbors(n)) {
+              yield* traverse(n,nn,c1,c2);
+            }
+          } else {
+            for(let nn of neighbors(n)) {
+              yield* traverse(n,nn,c2,c1);
+            }
+          }
+        }
+        vertices.forEach(v=>{
+          v.traversed = false;
+        });
+        yield* traverse(minV,na[0],color0,color2);
+        vertices.forEach(v=>{
+          delete v.traversed;
+        });
+        // judge
+        if(found) {
+          // flip [1]
+          endChain();
+          yield* wait(30);
+          resetChain();
+          startChain(minV);
+          chainType = "flip";
+          orbits = new Set();
+          vertices.forEach(v=>{
+            v.traversed = false;
+          });
+          yield* traverse(minV,na[1],color1,color0);
+          vertices.forEach(v=>{
+            delete v.traversed;
+          });
+          yield* wait(20);
+          orbits.forEach(v=>{
+            if(v.state.name == color1) {
+              v.state.name = color0;
+            } else {
+              v.state.name = color1;
+            }
+          });
+          yield* wait(20);
+        } else {
+          // flip [0]
+          yield* wait(20);
+          orbits.forEach(v=>{
+            if(v.state.name == color0) {
+              v.state.name = color2;
+            } else {
+              v.state.name = color0;
+            }
+          });
+          yield* wait(20);
+        }
+        endChain();
+        yield* wait(30);
+        resetChain();
+      };
+      // Main process
       let choices = [];
-      for(let i=0;i<5;i++) {
-        if(!colors[i]) choices.push(i);
+      while(true) {
+        let colors = {0:false, 1:false, 2:false, 3:false, 4:false};
+        choices = [];
+        startChain(minV);
+        chainType = "default";
+        for(let n of ns) {
+          yield* wait(10);
+          let rn = yield* trace(minV,n);
+          colors[rn.state.name] = true;
+        }
+        yield* wait(10);
+        for(let i=0;i<5;i++) {
+          if(!colors[i]) choices.push(i);
+        }
+        if(choices.length != 0) break;
+        endChain();
+        yield* wait(30);
+        resetChain();
+        yield* kempeMethod();
+        // Retry!
       }
-      if(choices.length == 0) {
-        let na = new Array(ns);
-        console.log(na);
-        // TODO: degree five
-        console.log("yabai");
-      } else {
-        let index = 0; //Math.floor(Math.random()*choices.length);
-        minV.state.name = choices[index];
-      }
+      let index = 0; //Math.floor(Math.random()*choices.length);
+      minV.state.name = choices[index];
       endChain();
       yield* wait(30);
       resetChain();
@@ -523,11 +615,28 @@ window.addEventListener("load",_=>{
       R.lineRad(edgeEnd,mouseMot,edgeEnd.proxy?5:15,0);
     }
     ctx.stroke();
-    // black
+    // chain
+    let chainColor = f=>{
+      if(chainType=="kempe") {
+        let r = Math.round(f);
+        let g = Math.round(255);
+        let b = Math.round(255);
+        return [r,g,b];
+      } else if(chainType=="flip") {
+        let r = Math.round(255);
+        let g = Math.round(f);
+        let b = Math.round(255);
+        return [r,g,b];
+      } else {
+        let r = Math.round(f);
+        let g = Math.round(f);
+        let b = Math.round(f);
+        return [r,g,b];
+      }
+    };
     vertices.forEach(v=>{
       if(!v.state || Math.abs(v.state.frame-255)<1) return;
-      let b = Math.round(v.state.frame);
-      ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
+      ctx.strokeStyle="rgba(" + chainColor(v.state.frame).join(",") + ",1)";
       ctx.beginPath();
       if(!v.proxy) {
         if(!v.fixColor) {
@@ -545,8 +654,7 @@ window.addEventListener("load",_=>{
       v.state.chain.forEach(c=>{
         let n = c.target;
         if(!n.state || Math.abs(n.state.frame-255)<1) return;
-        let b = Math.round(c.color);
-        ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
+        ctx.strokeStyle="rgba(" + chainColor(c.color).join(",") + ",1)";
         ctx.beginPath();
         R.lineRad(v,n,v.proxy?5:15,n.proxy?5:15);
         ctx.stroke();
