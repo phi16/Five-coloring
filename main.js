@@ -1,3 +1,6 @@
+window.oncontextmenu = _=>{
+  return false;
+};
 window.addEventListener("load",_=>{
   const cvs = document.getElementById("canvas");
   const ctx = cvs.getContext("2d");
@@ -6,21 +9,24 @@ window.addEventListener("load",_=>{
       ctx.moveTo(p.x+r,p.y);
       ctx.arc(p.x,p.y,r,0,Math.PI*2,true);
     },
-    lineRad: (a,b,r)=>{
+    lineRad: (a,b,rb,ra)=>{
       let p = {x: a.x, y: a.y};
       let q = {x: b.x, y: b.y};
       let dx = q.x - p.x;
       let dy = q.y - p.y;
       let le = Math.sqrt(dx*dx+dy*dy);
-      if(le < r) return;
+      if(le < ra + rb) return;
       dx /= le;
       dy /= le;
-      q.x -= dx * r;
-      q.y -= dy * r;
-      p.x += dx * r;
-      p.y += dy * r;
+      q.x -= dx * ra;
+      q.y -= dy * ra;
+      p.x += dx * rb;
+      p.y += dy * rb;
       ctx.moveTo(q.x,q.y);
       ctx.lineTo(p.x,p.y);
+    },
+    point: (p)=>{
+      R.circle(p,2.5);
     }
   };
   const resize = _=>{
@@ -33,24 +39,30 @@ window.addEventListener("load",_=>{
   window.addEventListener("resize",resize);
 
   const mouse = {x:0,y:0};
-  let mouseSnap = _=>_;
-  let mouseHandler = function*(){};
   let mouseGen = null;
   window.addEventListener("mousemove",e=>{
     mouse.x = e.clientX;
     mouse.y = e.clientY;
     mouseSnap();
     if(mouseGen) mouseGen.next(true);
-    else if(makeEdge) safeCheck(); // backward reference :(
+    else if(makeEdge) safeCheck();
   });
   window.addEventListener("mousedown",e=>{
     mouse.x = e.clientX;
     mouse.y = e.clientY;
+    if(e.button == 2) {
+      onPressRight();
+      return;
+    }
     mouseSnap();
     mouseGen = mouseHandler();
     mouseGen.next();
   });
-  window.addEventListener("mouseup",_=>{
+  window.addEventListener("mouseup",e=>{
+    if(e.button == 2) {
+      onReleaseRight();
+      return;
+    }
     mouseGen.next(false);
     mouseGen = null;
   });
@@ -91,13 +103,27 @@ window.addEventListener("load",_=>{
     );
   };
 
-  let vertices = new Set(); // Set {x:R,y:R,neighbor:Set Vertex}
+  let vertices = new Set(); // Set {x:R,y:R,proxy:false,neighbor:Set Vertex,state:State}
 
+  let proxyChanged = false;
+  const onPressRight = _=>{
+    proxyChanged = false;
+    if(mouseTarget) {
+      mouseTarget.proxy = !mouseTarget.proxy;
+      proxyChanged = true;
+      safeCheck();
+      resetColoring();
+    }
+  };
+
+  const onReleaseRight = _=>{
+    if(proxyChanged) startColoring();
+  };
   const mouseMot = {x:0,y:0};
   let mouseTarget = null;
   const mouseTo = {x:0,y:0};
   let removeC = false;
-  mouseSnap = _=>{
+  const mouseSnap = _=>{
     let nv = null;
     let nd = -1;
     vertices.forEach(v=>{
@@ -127,13 +153,21 @@ window.addEventListener("load",_=>{
   let safe = true;
   let safeCheck = _=>{
     safe = true;
+    // proxy should have exactly 2 neighbors
+    vertices.forEach(v=>{
+      if(v.proxy && v.neighbor.size!=2) {
+        safe = false;
+      }
+    });
+
+    let s = v=>v.proxy ? 5 : 15;
     // vertex overlapping
     withTraverse(vertices,_=>{
       vertices.forEach(v1=>{
         v1.traversed = true;
         vertices.forEach(v2=>{
           if(v2.traversed) return;
-          if(dist(v1,v2) < 15+15) {
+          if(dist(v1,v2) < s(v1)+s(v2)) {
             safe = false;
           }
         });
@@ -145,12 +179,12 @@ window.addEventListener("load",_=>{
       v1.neighbor.forEach(v2=>{
         vertices.forEach(v=>{
           if(v1==v || v2==v) return;
-          if(distLinePoint(v1,v2,v) < 15+5) {
+          if(distLinePoint(v1,v2,v) < s(v)+5) {
             safe = false;
           }
         });
       });
-      if(makeEdge && v1!=mouseTarget && v1!=edgeEnd && distLinePoint(edgeEnd,mouseMot,v1) < 15+5) {
+      if(makeEdge && v1!=mouseTarget && v1!=edgeEnd && distLinePoint(edgeEnd,mouseMot,v1) < s(v1)+5) {
         safe = false;
       }
     });
@@ -179,13 +213,16 @@ window.addEventListener("load",_=>{
     });
   };
 
-  mouseHandler = function*(){
+  const mouseHandler = function*(){
     if(!mouseTarget) {
+      resetColoring();
       // Create a vertex
       const v = {
         x: mouse.x,
         y: mouse.y,
-        neighbor: new Set()
+        neighbor: new Set(),
+        state: null,
+        proxy: false
       };
       vertices.add(v);
       if(makeEdge) {
@@ -199,10 +236,12 @@ window.addEventListener("load",_=>{
         v.y = mouse.y;
         safeCheck();
       }
+      startColoring();
     } else {
-      // Move a vertex, or Draw a edge
+      // Move a vertex, or Draw an edge
       let v = mouseTarget;
       if(makeEdge) {
+        resetColoring();
         if(removeC) {
           // Remove a vertex
           v.neighbor.forEach(n=>{
@@ -212,11 +251,13 @@ window.addEventListener("load",_=>{
           removeC = false;
           makeEdge = false;
         } else {
+          // Draw an edge
           edgeEnd.neighbor.add(v);
           v.neighbor.add(edgeEnd);
           makeEdge = false;
         }
         safeCheck();
+        startColoring();
       } else {
         let moved = false;
         while(yield) {
@@ -226,22 +267,164 @@ window.addEventListener("load",_=>{
           safeCheck();
         }
         if(!moved) {
-          // Drawing a edge
+          // Drawing an edge
           edgeEnd = v;
           makeEdge = true;
           removeC = true; // may want to remove the vertex
         }
         safeCheck();
+        if(!coloringGen) startColoring();
       }
     }
   };
 
+  let blackFrame = false;
+  let blackCenter = null;
+  let coloringGen = null;
+  const resetColoring = _=>{
+    vertices.forEach(v=>{
+      v.state = null;
+      blackFrame = false;
+    });
+    coloringGen = null;
+  };
+  const startColoring = _=>{
+    if(!safe) return;
+    coloringGen = coloringHandler();
+  };
+  const coloringHandler = function*(){
+    let verts = new Set();
+    vertices.forEach(v=>{
+      if(!v.proxy) verts.add(v);
+    });
+    function neighbors(v) {
+      let s = new Set();
+      function traverse(v,n,f) {
+        if(n.proxy) {
+          n.neighbor.forEach(nn=>{
+            if(nn!=v) traverse(n,nn,f);
+          });
+        } else {
+          f(n);
+        }
+      }
+      v.neighbor.forEach(n=>{
+        traverse(v,n,e=>{
+          if(e.state.name != "Reduce") s.add(n);
+        });
+      });
+      return s;
+    }
+    function resetFrame() {
+      vertices.forEach(v=>{
+        v.state.black = false;
+      });
+      blackFrame = false;
+    }
+    function* trace(v,n) {
+      n.state.black = true;
+      yield* wait(20);
+      if(n.proxy) {
+        for(let nn of neighbors(n)) {
+          if(v != nn) {
+            return yield* trace(n,nn);
+          }
+        }
+      } else {
+        return n;
+      }
+    }
+    function* wait(d) {
+      for(let i=0;i<d;i++) {
+        verts.forEach(v=>{
+          let n = v.state.name;
+          let c = v.state.color;
+          let to = [0,0,0,1];
+          if(n == "Wait") to = [128,128,128,1];
+          if(n == "Reduce") to = [128,128,128,0];
+          if(n == 0) to = [228,141,10,1];
+          if(n == 1) to = [249,19,179,1];
+          if(n == 2) to = [149,58,248,1];
+          if(n == 3) to = [32,94,236,1];
+          if(n == 4) to = [17,219,143,1];
+          for(let j=0;j<4;j++) {
+            c[j] += (to[j] - c[j]) / 4;
+          }
+        });
+        vertices.forEach(v=>{
+          if(!v.state) return;
+          let frameTo = blackFrame && (v.state.black || blackCenter == v) ? 0 : 255;
+          v.state.frame += (frameTo - v.state.frame) / 4;
+        });
+        yield;
+      }
+    }
+    function* reduce() {
+      // in 4-coloring situation,
+      // "V" will be a graph...
+      let minV = null;
+      let minC = -1;
+      verts.forEach(v=>{
+        if(v.state.name != "Wait") return;
+        let c = neighbors(v).size;
+        if(minV==null || c<minC) {
+          minV = v;
+          minC = c;
+        }
+      });
+      if(!minV) return;
+      minV.state.name = "Reduce";
+      console.log(minC);
+      yield* wait(10);
+      yield* reduce();
+      let colors = {0:false, 1:false, 2:false, 3:false, 4:false};
+      blackFrame = true;
+      blackCenter = minV;
+      yield* wait(10);
+      for(let n of neighbors(minV)) {
+        let rn = yield* trace(minV,n);
+        colors[rn.state.name] = true;
+      }
+      yield* wait(20);
+      let choices = [];
+      for(let i=0;i<5;i++) {
+        if(!colors[i]) choices.push(i);
+      }
+      if(choices.length == 0) {
+        // TODO: degree five 
+        console.log("yabai");
+      } else {
+        let index = 0; //Math.floor(Math.random()*choices.length);
+        minV.state.name = choices[index];
+      }
+      resetFrame();
+      yield* wait(30);
+      blackCenter = null;
+    }
+    vertices.forEach(v=>{
+      v.state = {
+        name: "Wait",
+        color: [128,128,128,1],
+        black: false,
+        frame: 255
+      };
+    });
+    yield* wait(100);
+    yield* reduce();
+  };
+
   const render = _=>{
+    if(coloringGen) coloringGen.next();
+
     ctx.clearRect(0,0,cvs.width,cvs.height);
+    ctx.lineCap = "round";
 
     // bg
     vertices.forEach(v=>{
-      ctx.fillStyle="rgba(128,128,128,1)";
+      if(v.proxy) return;
+      let c = v.state ? v.state.color : [128,128,128,1];
+      c = [Math.round(c[0]), Math.round(c[1]), Math.round(c[2]), c[3]];
+      ctx.fillStyle="rgba(" + c.join(",") + ")";
       ctx.beginPath();
       R.circle(v,15);
       ctx.fill();
@@ -250,25 +433,70 @@ window.addEventListener("load",_=>{
     // frame
     ctx.shadowColor = safe ? "rgba(0,0,0,1)" : "rgba(255,0,0,1)"
     ctx.shadowBlur = 4;
+    // white
     ctx.strokeStyle="rgba(255,255,255,1)";
     ctx.lineWidth = 5;
     ctx.beginPath();
     vertices.forEach(v=>{
-      R.circle(v,12.5);
+      if(!v.proxy) {
+        R.circle(v,12.5);
+      } else {
+        R.point(v);
+      }
     });
     withTraverse(vertices,_=>{
       vertices.forEach(v=>{
         v.neighbor.forEach(n=>{
           if(n.traversed) return;
-          R.lineRad(v,n,10);
+          R.lineRad(v,n,v.proxy?5:15,n.proxy?5:15);
         });
         v.traversed = true;
       });
     });
     if(makeEdge) {
-      R.lineRad(edgeEnd,mouseMot,10);
+      R.lineRad(edgeEnd,mouseMot,edgeEnd.proxy?5:15,0);
     }
     ctx.stroke();
+    // black
+    vertices.forEach(v=>{
+      if(!v.state || Math.abs(v.state.frame-255)<1) return;
+      let b = Math.round(v.state.frame);
+      ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
+      ctx.beginPath();
+      if(!v.proxy) {
+        R.circle(v,12.5);
+      } else {
+        R.point(v);
+      }
+      ctx.stroke();
+    });
+    if(blackCenter) {
+      let v = blackCenter;
+      v.neighbor.forEach(n=>{
+        if(!n.state || Math.abs(n.state.frame-255)<1) return;
+        let b = Math.round(v.state.frame);
+        ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
+        ctx.beginPath();
+        R.lineRad(v,n,v.proxy?5:15,n.proxy?5:15);
+        ctx.stroke();
+      });
+      withTraverse(vertices,_=>{
+        vertices.forEach(v=>{
+          if(!v.state || Math.abs(v.state.frame-255)<1) return;
+          v.neighbor.forEach(n=>{
+            if(n.traversed) return;
+            if(!n.state || Math.abs(n.state.frame-255)<1) return;
+            if(!v.proxy && !n.proxy) return;
+            let b = Math.round(n.state.frame);
+            ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
+            ctx.beginPath();
+            R.lineRad(v,n,v.proxy?5:15,n.proxy?5:15);
+            ctx.stroke();
+          });
+          v.traversed = true;
+        });
+      });
+    }
     ctx.shadowBlur = 0;
 
     // mouse
