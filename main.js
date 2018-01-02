@@ -315,14 +315,21 @@ window.addEventListener("load",_=>{
       });
       return s;
     }
-    function resetFrame() {
-      vertices.forEach(v=>{
-        v.state.black = false;
-      });
+    function startChain(v) {
+      blackFrame = true;
+      blackCenter = v;
+    }
+    function endChain() {
       blackFrame = false;
     }
+    function resetChain() {
+      vertices.forEach(v=>{
+        v.state.chain = new Set();
+      });
+      blackCenter = null;
+    }
     function* trace(v,n) {
-      n.state.black = true;
+      v.state.chain.add({target:n,color:255});
       yield* wait(20);
       if(n.proxy) {
         for(let nn of neighbors(n)) {
@@ -353,8 +360,15 @@ window.addEventListener("load",_=>{
         });
         vertices.forEach(v=>{
           if(!v.state) return;
-          let frameTo = blackFrame && (v.state.black || blackCenter == v) ? 0 : 255;
-          v.state.frame += (frameTo - v.state.frame) / 4;
+          if(blackCenter == v) {
+            let to = !blackFrame ? 255 : 0;
+            v.state.frame += (to - v.state.frame) / 4;
+          }
+          v.state.chain.forEach(c=>{
+            let to = !blackFrame ? 255 : v.state.frame;
+            c.target.state.frame += (to - c.target.state.frame) / 4;
+            c.color += (to - c.color) / 4;
+          });
         });
         yield;
       }
@@ -378,10 +392,9 @@ window.addEventListener("load",_=>{
       yield* wait(10);
       yield* reduce();
       let colors = {0:false, 1:false, 2:false, 3:false, 4:false};
-      blackFrame = true;
-      blackCenter = minV;
-      yield* wait(10);
+      startChain(minV);
       for(let n of neighbors(minV)) {
+        yield* wait(10);
         let rn = yield* trace(minV,n);
         colors[rn.state.name] = true;
       }
@@ -391,22 +404,23 @@ window.addEventListener("load",_=>{
         if(!colors[i]) choices.push(i);
       }
       if(choices.length == 0) {
-        // TODO: degree five 
+        // TODO: degree five
         console.log("yabai");
       } else {
         let index = 0; //Math.floor(Math.random()*choices.length);
         minV.state.name = choices[index];
       }
-      resetFrame();
+      endChain();
       yield* wait(30);
-      blackCenter = null;
+      resetChain();
     }
     vertices.forEach(v=>{
       v.state = {
         name: "Wait",
         color: [128,128,128,1],
         black: false,
-        frame: 255
+        frame: 255,
+        chain: new Set()
       };
     });
     yield* wait(100);
@@ -470,33 +484,19 @@ window.addEventListener("load",_=>{
       }
       ctx.stroke();
     });
-    if(blackCenter) {
-      let v = blackCenter;
-      v.neighbor.forEach(n=>{
+    vertices.forEach(v=>{
+      if(!v.state || Math.abs(v.state.frame-255)<1) return;
+      v.state.chain.forEach(c=>{
+        let n = c.target;
         if(!n.state || Math.abs(n.state.frame-255)<1) return;
-        let b = Math.round(v.state.frame);
+        let b = Math.round(c.color);
         ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
         ctx.beginPath();
         R.lineRad(v,n,v.proxy?5:15,n.proxy?5:15);
         ctx.stroke();
       });
-      withTraverse(vertices,_=>{
-        vertices.forEach(v=>{
-          if(!v.state || Math.abs(v.state.frame-255)<1) return;
-          v.neighbor.forEach(n=>{
-            if(n.traversed) return;
-            if(!n.state || Math.abs(n.state.frame-255)<1) return;
-            if(!v.proxy && !n.proxy) return;
-            let b = Math.round(n.state.frame);
-            ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
-            ctx.beginPath();
-            R.lineRad(v,n,v.proxy?5:15,n.proxy?5:15);
-            ctx.stroke();
-          });
-          v.traversed = true;
-        });
-      });
-    }
+      v.traversed = true;
+    });
     ctx.shadowBlur = 0;
 
     // mouse
