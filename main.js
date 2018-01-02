@@ -1,6 +1,13 @@
 window.oncontextmenu = _=>{
   return false;
 };
+let colors = [
+  [228,141,10,1],
+  [249,19,179,1],
+  [149,58,248,1],
+  [32,94,236,1],
+  [17,219,143,1]
+]
 window.addEventListener("load",_=>{
   const cvs = document.getElementById("canvas");
   const ctx = cvs.getContext("2d");
@@ -8,6 +15,14 @@ window.addEventListener("load",_=>{
     circle: (p,r)=>{
       ctx.moveTo(p.x+r,p.y);
       ctx.arc(p.x,p.y,r,0,Math.PI*2,true);
+    },
+    hexagon: (p,r)=>{
+      ctx.moveTo(p.x,p.y-r);
+      for(let i=1;i<7;i++) {
+        let x = Math.sin(i*Math.PI*2/6) * r;
+        let y = - Math.cos(i*Math.PI*2/6) * r;
+        ctx.lineTo(p.x+x,p.y+y);
+      }
     },
     lineRad: (a,b,rb,ra)=>{
       let p = {x: a.x, y: a.y};
@@ -66,6 +81,11 @@ window.addEventListener("load",_=>{
     mouseGen.next(false);
     mouseGen = null;
   });
+  window.addEventListener("keypress",e=>{
+    if(48<=e.keyCode && e.keyCode<=57) {
+      onPressDigit(e.keyCode-48);
+    }
+  });
 
   const withTraverse = (s,f)=>{
     s.forEach(e=>{
@@ -115,10 +135,18 @@ window.addEventListener("load",_=>{
       resetColoring();
     }
   };
-
   const onReleaseRight = _=>{
     if(proxyChanged) startColoring();
   };
+  const onPressDigit = d=>{
+    if(mouseTarget && 0 <= d && d <= 5) {
+      mouseTarget.fixColor = d;
+      safeCheck();
+      resetColoring();
+      startColoring();
+    }
+  };
+
   const mouseMot = {x:0,y:0};
   let mouseTarget = null;
   const mouseTo = {x:0,y:0};
@@ -158,6 +186,19 @@ window.addEventListener("load",_=>{
       if(v.proxy && v.neighbor.size!=2) {
         safe = false;
       }
+    });
+    // no adjacent pairs have same color
+    withTraverse(vertices,_=>{
+      vertices.forEach(v=>{
+        if(v.fixColor==0) return;
+        v.traversed = true;
+        v.neighbor.forEach(n=>{
+          if(n.traversed && n.fixColor==0) return;
+          if(v.fixColor == n.fixColor) {
+            safe = false;
+          }
+        });
+      });
     });
 
     let s = v=>v.proxy ? 5 : 15;
@@ -222,7 +263,8 @@ window.addEventListener("load",_=>{
         y: mouse.y,
         neighbor: new Set(),
         state: null,
-        proxy: false
+        proxy: false,
+        fixColor: 0
       };
       vertices.add(v);
       if(makeEdge) {
@@ -348,12 +390,8 @@ window.addEventListener("load",_=>{
           let c = v.state.color;
           let to = [0,0,0,1];
           if(n == "Wait") to = [128,128,128,1];
-          if(n == "Reduce") to = [128,128,128,0];
-          if(n == 0) to = [228,141,10,1];
-          if(n == 1) to = [249,19,179,1];
-          if(n == 2) to = [149,58,248,1];
-          if(n == 3) to = [32,94,236,1];
-          if(n == 4) to = [17,219,143,1];
+          else if(n == "Reduce") to = [128,128,128,0];
+          else to = colors[n];
           for(let j=0;j<4;j++) {
             c[j] += (to[j] - c[j]) / 4;
           }
@@ -392,18 +430,21 @@ window.addEventListener("load",_=>{
       yield* wait(10);
       yield* reduce();
       let colors = {0:false, 1:false, 2:false, 3:false, 4:false};
+      let ns = neighbors(minV);
       startChain(minV);
-      for(let n of neighbors(minV)) {
+      for(let n of ns) {
         yield* wait(10);
         let rn = yield* trace(minV,n);
         colors[rn.state.name] = true;
       }
-      yield* wait(20);
+      yield* wait(10);
       let choices = [];
       for(let i=0;i<5;i++) {
         if(!colors[i]) choices.push(i);
       }
       if(choices.length == 0) {
+        let na = new Array(ns);
+        console.log(na);
         // TODO: degree five
         console.log("yabai");
       } else {
@@ -422,6 +463,10 @@ window.addEventListener("load",_=>{
         frame: 255,
         chain: new Set()
       };
+      if(v.fixColor) {
+        v.state.name = v.fixColor-1;
+        v.state.color = colors[v.state.name].concat([]);
+      }
     });
     yield* wait(100);
     yield* reduce();
@@ -436,14 +481,17 @@ window.addEventListener("load",_=>{
     // bg
     vertices.forEach(v=>{
       if(v.proxy) return;
-      let c = v.state ? v.state.color : [128,128,128,1];
+      let c = v.state ? v.state.color : v.fixColor ? colors[v.fixColor-1] : [128,128,128,1];
       c = [Math.round(c[0]), Math.round(c[1]), Math.round(c[2]), c[3]];
       ctx.fillStyle="rgba(" + c.join(",") + ")";
       ctx.beginPath();
-      R.circle(v,15);
+      if(!v.fixColor) {
+        R.circle(v,15);
+      } else {
+        R.hexagon(v,15);
+      }
       ctx.fill();
     });
-
     // frame
     ctx.shadowColor = safe ? "rgba(0,0,0,1)" : "rgba(255,0,0,1)"
     ctx.shadowBlur = 4;
@@ -453,7 +501,11 @@ window.addEventListener("load",_=>{
     ctx.beginPath();
     vertices.forEach(v=>{
       if(!v.proxy) {
-        R.circle(v,12.5);
+        if(!v.fixColor) {
+          R.circle(v,12.5);
+        } else {
+          R.hexagon(v,12.5);
+        }
       } else {
         R.point(v);
       }
@@ -478,7 +530,11 @@ window.addEventListener("load",_=>{
       ctx.strokeStyle="rgba(" + [b,b,b].join(",") + ",1)";
       ctx.beginPath();
       if(!v.proxy) {
-        R.circle(v,12.5);
+        if(!v.fixColor) {
+          R.circle(v,12.5);
+        } else {
+          R.hexagon(v,12.5);
+        }
       } else {
         R.point(v);
       }
