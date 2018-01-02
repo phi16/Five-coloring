@@ -616,6 +616,7 @@ window.addEventListener("load",_=>{
       R.lineRad(edgeEnd,mouseMot,edgeEnd.proxy?5:15,0);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
     // chain
     let chainColor = f=>{
       if(chainType=="kempe") {
@@ -662,7 +663,6 @@ window.addEventListener("load",_=>{
       });
       v.traversed = true;
     });
-    ctx.shadowBlur = 0;
 
     // mouse
     mouseMot.x += (mouseTo.x - mouseMot.x) / 2;
