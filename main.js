@@ -450,6 +450,7 @@ window.addEventListener("load",_=>{
         let color0 = na[0].state.name;
         let color1 = na[1].state.name;
         let color2 = na[2].state.name;
+        let color3 = na[3].state.name;
         function* traverse(v,n,c1,c2) {
           if(n.state.name != c1 || n.traversed) return;
           orbits.add(n);
@@ -489,14 +490,14 @@ window.addEventListener("load",_=>{
           vertices.forEach(v=>{
             v.traversed = false;
           });
-          yield* traverse(minV,na[1],color1,color0);
+          yield* traverse(minV,na[1],color1,color3);
           vertices.forEach(v=>{
             delete v.traversed;
           });
           yield* wait(20);
           orbits.forEach(v=>{
             if(v.state.name == color1) {
-              v.state.name = color0;
+              v.state.name = color3;
             } else {
               v.state.name = color1;
             }
