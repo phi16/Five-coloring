@@ -375,6 +375,17 @@ window.addEventListener("load",_=>{
       });
       blackCenter = null;
     }
+    function traceDirect(v,n) {
+      if(n.proxy) {
+        for(let nn of neighbors(n)) {
+          if(v != nn) {
+            return traceDirect(n,nn);
+          }
+        }
+      } else {
+        return n;
+      }
+    }
     function* trace(v,n) {
       v.state.chain.add({target:n,color:255});
       yield* wait(20);
@@ -447,12 +458,12 @@ window.addEventListener("load",_=>{
         });
         let found = false;
         let orbits = new Set();
-        let color0 = na[0].state.name;
-        let color1 = na[1].state.name;
-        let color2 = na[2].state.name;
-        let color3 = na[3].state.name;
+        let color0 = traceDirect(minV,na[0]).state.name;
+        let color1 = traceDirect(minV,na[1]).state.name;
+        let color2 = traceDirect(minV,na[2]).state.name;
+        let color3 = traceDirect(minV,na[3]).state.name;
         function* traverse(v,n,c1,c2) {
-          if(n.state.name != c1 || n.traversed) return;
+          if(traceDirect(v,n).state.name != c1 || n.traversed) return;
           orbits.add(n);
           v.state.chain.add({target:n,color:255});
           yield* wait(20);
